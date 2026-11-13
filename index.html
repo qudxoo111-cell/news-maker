@@ -323,7 +323,7 @@ async function fetchLatestNews(feedUrl, desiredCount){
     {name:'RSS 프록시 C',url:'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(feedUrl),kind:'xml'}
   ];
   const errors=[];
-  for(const endpoint of (desiredCount<=10?endpoints:endpoints.slice(1).concat(endpoints[0]))){
+  for(const endpoint of endpoints){
     try{
       $('autoStatus').textContent=endpoint.name+'에서 실제 뉴스 확인 중…';
       const resp=await getWithTimeout(endpoint.url);
@@ -422,21 +422,50 @@ function updateCounts(){
 $('news').addEventListener('input',updateCounts);
 $('articles').addEventListener('input',updateCounts);
 
-async function findImages(q,n,big){
-  const p=new URLSearchParams({action:'query',format:'json',origin:'*',generator:'search',gsrnamespace:'6',
-    gsrsearch:q+($('photoOnly').checked?' filetype:bitmap':''),gsrlimit:big?'50':'20',prop:'imageinfo',iiprop:'url|extmetadata|mime|size',iiurlwidth:big?'1920':'480'});
-  const j=await (await fetch(API+'?'+p)).json();
-  const pages=Object.values(j.query?.pages||{}).sort((a,b)=>(a.index||0)-(b.index||0));
-  const out=[];
+function commonsItems(pages,n,out,seen){
   for(const pg of pages){
     const ii=pg.imageinfo?.[0]; if(!ii) continue; const m=ii.extmetadata||{};
+    if(seen.has(pg.title))continue;
     if($('photoOnly').checked && !/jpe?g/i.test(ii.mime||'')) continue;
     const license=strip(m.LicenseShortName?.value)||'';
     if($('freeOnly').checked && !FREE.test(license)) continue;
+    seen.add(pg.title);
     out.push({title:pg.title.replace(/^File:/,''),page:ii.descriptionurl,thumb:ii.thumburl||ii.url,orig:ii.url,ow:ii.width,oh:ii.height,license,
       licUrl:m.LicenseUrl?.value||'',artist:strip(m.Artist?.value)||'저작자 미상'});
     if(out.length>=n) break;
   }
+}
+async function commonsQuery(extra,n,out,seen,width){
+  const p=new URLSearchParams(Object.assign({action:'query',format:'json',origin:'*',prop:'imageinfo',iiprop:'url|extmetadata|mime|size',iiurlwidth:width},extra));
+  const j=await (await fetch(API+'?'+p)).json();
+  const pages=Object.values(j.query?.pages||{}).sort((a,b)=>(a.index||0)-(b.index||0));
+  commonsItems(pages,n,out,seen);
+}
+// 위키데이터로 인물·그룹을 정확히 찾아 그 사람의 사진만 가져오기
+const WD='https://www.wikidata.org/w/api.php';
+const PERSONISH=new Set(['Q5','Q215380','Q641066','Q216337','Q9212979','Q2088357','Q5741069','Q105543609']);
+async function wikidataPerson(q){
+  const s=await (await fetch(WD+'?'+new URLSearchParams({action:'wbsearchentities',search:q,language:'ko',uselang:'ko',type:'item',limit:'7',format:'json',origin:'*'}))).json();
+  const ids=(s.search||[]).map(x=>x.id);if(!ids.length)return null;
+  const e=await (await fetch(WD+'?'+new URLSearchParams({action:'wbgetentities',ids:ids.join('|'),props:'claims|labels',languages:'en|ko',format:'json',origin:'*'}))).json();
+  for(const id of ids){const en=e.entities?.[id];if(!en)continue;
+    const p31=(en.claims?.P31||[]).map(c=>c.mainsnak?.datavalue?.value?.id);
+    if(!p31.some(x=>PERSONISH.has(x)))continue;
+    return {id,en:en.labels?.en?.value||'',p18:(en.claims?.P18||[]).map(c=>c.mainsnak?.datavalue?.value).filter(Boolean),cat:en.claims?.P373?.[0]?.mainsnak?.datavalue?.value||''};}
+  return null;
+}
+async function findImages(q,n,big){
+  const width=big?'1920':'480';const out=[],seen=new Set();
+  if(big){
+    let person=null;try{person=await wikidataPerson(q);}catch(_){}
+    if(!person){log('  · 위키데이터에서 "'+q+'" 인물을 못 찾음 → 관련 없는 사진 방지를 위해 건너뜀');return out;}
+    log('  · 인물 확인: '+(person.en||q)+' ('+person.id+')');
+    if(person.p18.length)try{await commonsQuery({titles:person.p18.map(f=>'File:'+f).join('|')},n,out,seen,width);}catch(_){}
+    if(out.length<n&&person.cat)try{await commonsQuery({generator:'categorymembers',gcmtitle:'Category:'+person.cat,gcmtype:'file',gcmlimit:'50'},n,out,seen,width);}catch(_){}
+    if(out.length<n&&person.en)try{await commonsQuery({generator:'search',gsrnamespace:'6',gsrsearch:'"'+person.en+'"'+($('photoOnly').checked?' filetype:bitmap':''),gsrlimit:'30'},n,out,seen,width);}catch(_){}
+    return out.slice(0,n);
+  }
+  await commonsQuery({generator:'search',gsrnamespace:'6',gsrsearch:q+($('photoOnly').checked?' filetype:bitmap':''),gsrlimit:'20'},n,out,seen,width);
   return out;
 }
 async function toBase64(url){
@@ -464,8 +493,8 @@ async function ensureDir(){ // 클릭 직후(사용자 동작 안)에서 호출
 $('pickFolder').onclick=async()=>{if(!window.showDirectoryPicker){alert('이 브라우저는 폴더 저장을 지원하지 않아요. 크롬이나 엣지를 써 주세요.');return;}try{await chooseDir();}catch(_){}}
 async function writeFile(dir,name,blob){const fh=await dir.getFileHandle(name,{create:true});const w=await fh.createWritable();await w.write(blob);await w.close();}
 function cleanTitle(t){return (t||'').replace(/\s+-\s+[^-]{1,25}$/,'').trim();}
-async function makeCaptionPng(dataUrl,caption,credit){
-  const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=dataUrl;});
+async function makeCaptionPng(src,caption,credit){
+  const img=(src instanceof Blob)?await createImageBitmap(src):await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=src;});
   const c=document.createElement('canvas');c.width=1080;c.height=1350;const x=c.getContext('2d');
   const ir=img.width/img.height,br=c.width/c.height;let sw,sh,sx,sy;
   if(ir>br){sh=img.height;sw=sh*br;sx=(img.width-sw)/2;sy=0}else{sw=img.width;sh=sw/br;sx=0;sy=(img.height-sh)/4}
@@ -523,13 +552,21 @@ $('run').onclick=async()=>{
     tr.children[2].textContent=content?('본문 '+content.length.toLocaleString()+'자 저장'):'본문 없음';
     for(let k=0;k<imgs.length;k++){
       try{
-        const d=await toBase64(imgs[k].thumb);
-        const id=wb.addImage({base64:d.base64,extension:d.ext});
-        const s=Math.min((CELLW-8)/d.w,(CELLH-8)/d.h);
-        ws.addImage(id,{tl:{col:6+k+0.05,row:rowNo-1+0.05},ext:{width:Math.round(d.w*s),height:Math.round(d.h*s)},editAs:'oneCell'});
-        const im=document.createElement('img'); im.src=d.base64; try{capAdd(d.base64,'Photo: '+imgs[k].artist+' / '+imgs[k].license+' (Wikimedia Commons)',r.title);}catch(_){} origJobs.push({no:i+1,q:r.q,k:k+1,src:d.base64,ext:d.ext}); if(k===0)capJobs.push({no:i+1,q:r.q,title:r.title,src:d.base64,credit:'Photo: '+imgs[k].artist+' / '+imgs[k].license+' (Wikimedia Commons)'}); tr.children[3].appendChild(im); total++;
+        const blob=await (await fetch(imgs[k].thumb)).blob();
+        const ext=/png/i.test(blob.type)?'png':'jpeg';
+        const bm=await createImageBitmap(blob);const dw=bm.width,dh=bm.height;
+        const tc=document.createElement('canvas');const ts=160/Math.max(dw,dh);tc.width=Math.max(1,Math.round(dw*ts));tc.height=Math.max(1,Math.round(dh*ts));tc.getContext('2d').drawImage(bm,0,0,tc.width,tc.height);bm.close();
+        const small=tc.toDataURL('image/jpeg',0.7);
+        const id=wb.addImage({buffer:new Uint8Array(await blob.arrayBuffer()),extension:ext});
+        const s=Math.min((CELLW-8)/dw,(CELLH-8)/dh);
+        ws.addImage(id,{tl:{col:6+k+0.05,row:rowNo-1+0.05},ext:{width:Math.round(dw*s),height:Math.round(dh*s)},editAs:'oneCell'});
+        const credit='Photo: '+imgs[k].artist+' / '+imgs[k].license+' (Wikimedia Commons)';
+        const im=document.createElement('img'); im.src=small;
+        origJobs.push({no:i+1,q:r.q,k:k+1,blob,ext});
+        if(k===0){capJobs.push({no:i+1,q:r.q,title:r.title,blob,credit});try{capAdd(URL.createObjectURL(blob),credit,r.title);}catch(_){}}
+        tr.children[3].appendChild(im); total++;
       }catch(e){ log('  사진 받기 실패: '+imgs[k].title); }
-      await sleep(300);
+      await sleep(150);
     }
     log(`  → 사진 ${imgs.length}장 첨부 (고화질 최대 1920px)`);
     $('previewBody').appendChild(tr);
@@ -541,12 +578,11 @@ $('run').onclick=async()=>{
   const safeName=q=>(q||'news').replace(/[\\/:*?"<>|\s]+/g,'_').slice(0,20);
   let n=0;
   for(const j of capJobs){
-    try{const png=await makeCaptionPng(j.src,cleanTitle(j.title),j.credit);
+    try{const png=await makeCaptionPng(j.blob,cleanTitle(j.title),j.credit);
       files.push({path:`자막사진_${String(j.no).padStart(2,'0')}_${safeName(j.q)}.png`,blob:png});n++;}catch(e){log('  자막사진 실패: '+j.q);}
   }
   for(const o of origJobs){
-    const b=await (await fetch(o.src)).blob();
-    files.push({path:`사진원본/${String(o.no).padStart(2,'0')}_${safeName(o.q)}_${o.k}.${o.ext==='png'?'png':'jpg'}`,blob:b});
+    files.push({path:`사진원본/${String(o.no).padStart(2,'0')}_${safeName(o.q)}_${o.k}.${o.ext==='png'?'png':'jpg'}`,blob:o.blob});
   }
   window.nmLastResult={today,news:rows.length,photos:total,captions:n,originals:origJobs.length,files:files.length};
   const folder='연예뉴스_'+today;
@@ -567,7 +603,7 @@ $('run').onclick=async()=>{
   if(!saved){
     if(typeof JSZip!=='undefined'){
       const zip=new JSZip();for(const f of files)zip.file(folder+'/'+f.path,f.blob);
-      const zb=await zip.generateAsync({type:'blob'});
+      const zb=await zip.generateAsync({type:'blob',compression:'STORE'});
       dl(zb,folder+'.zip');
       log(`\n완료! 뉴스 ${rows.length}개, 사진 ${total}장 → 다운로드 폴더에 ${folder}.zip (엑셀 + 자막사진 ${n}장 + 사진원본 ${origJobs.length}장)`);
     }else{
