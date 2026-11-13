@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>뉴스 엑셀 메이커 + 채팅 자막</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
 *{box-sizing:border-box}
 body{margin:0;background:#f6f6f8;color:#1b1b1f;font-family:"Malgun Gothic","맑은 고딕",system-ui,sans-serif}
@@ -134,7 +135,8 @@ td img{height:64px;margin-right:4px;border-radius:4px}
       <label><input type="checkbox" id="freeOnly" checked> 자유 라이선스(CC·퍼블릭 도메인)만</label>
       <label><input type="checkbox" id="photoOnly" checked> 사진만 (로고·그림 제외)</label>
       <label><input type="checkbox" id="autoSave" checked> <b>폴더에 자동 저장</b> (엑셀 + 뉴스별 자막사진 PNG)</label>
-      <button class="gray" id="pickFolder" type="button">저장 폴더 바꾸기</button> <span id="folderName" style="font-size:13px;color:#666"></span>
+      <button class="gray" id="pickFolder" type="button">저장 폴더 바꾸기</button>
+      <label><input type="checkbox" id="keepAwake" checked> 화면 꺼짐 방지</label> <span id="folderName" style="font-size:13px;color:#666"></span>
     </div>
   </div>
 
@@ -898,6 +900,11 @@ $('capSave').onclick=()=>{if(!img){bot('먼저 사진을 골라 주세요.');ret
   const a=document.createElement('a');a.href=cv.toDataURL('image/png');a.download='자막사진_'+Date.now()+'.png';document.body.appendChild(a);a.click();a.remove();};
 draw();
 })();
+/* ===== 화면 꺼짐 방지 (이 페이지가 열려 있는 동안) ===== */
+let nmWake=null;
+async function nmAwake(){try{if($('keepAwake').checked&&'wakeLock' in navigator&&document.visibilityState==='visible'&&!nmWake){nmWake=await navigator.wakeLock.request('screen');nmWake.addEventListener('release',()=>{nmWake=null;});}}catch(_){}}
+$('keepAwake').addEventListener('change',()=>{if($('keepAwake').checked)nmAwake();else if(nmWake){nmWake.release();nmWake=null;}});
+document.addEventListener('visibilitychange',nmAwake);document.addEventListener('click',nmAwake,{once:true});nmAwake();
 /* ===== 하루 15개 한 번에 ===== */
 $('oneClick').onclick=async()=>{
   const btn=$('oneClick');btn.disabled=true;
