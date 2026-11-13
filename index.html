@@ -454,16 +454,27 @@ async function wikidataPerson(q){
     return {id,en:en.labels?.en?.value||'',p18:(en.claims?.P18||[]).map(c=>c.mainsnak?.datavalue?.value).filter(Boolean),cat:en.claims?.P373?.[0]?.mainsnak?.datavalue?.value||''};}
   return null;
 }
-async function findImages(q,n,big){
+const NM_STOP=new Set(['연예','연예계','연예인','배우','가수','그룹','방송','드라마','영화','예능','논란','의혹','근황','결혼','열애','이혼','공개','충격','오늘','단독','속보','최초','최고','사진','영상','팬들','시청률','멤버','데뷔','컴백','앨범','신곡','주연','출연','하차','합류','고백','폭로','심경','눈물','사과','해명','입장','소속사','남편','아내','엄마','아빠','아들','딸','친구','동생','언니','오빠','누나','형','이유','정체','반전','대박','화제']);
+function nmCandidates(q,title){
+  const c=[];const add=t=>{t=(t||'').trim();if(t.length>=2&&t.length<=12&&!NM_STOP.has(t)&&!c.includes(t))c.push(t);};
+  add(q);
+  const toks=(cleanTitle(title||'').match(/[가-힣]{2,6}|[A-Za-z][A-Za-z.\-]+(?:\s+[A-Za-z][A-Za-z.\-]+)?/g)||[]);
+  for(const t of toks){add(t);if(/[은는이가의과와을를도랑]$/.test(t)&&t.length>=3)add(t.slice(0,-1));if(t.length===4)add(t.slice(0,3));}
+  return c.slice(0,10);
+}
+async function findImages(q,n,big,title){
   const width=big?'1920':'480';const out=[],seen=new Set();
   if(big){
-    let person=null;try{person=await wikidataPerson(q);}catch(_){}
-    if(!person){log('  · 위키데이터에서 "'+q+'" 인물을 못 찾음 → 관련 없는 사진 방지를 위해 건너뜀');return out;}
-    log('  · 인물 확인: '+(person.en||q)+' ('+person.id+')');
+    let person=null,matched=q;
+    for(const cand of nmCandidates(q,title)){try{person=await wikidataPerson(cand);}catch(_){person=null;}if(person){matched=cand;break;}}
+    if(!person){log('  · 기사 제목에서 인물을 못 찾음 → 관련 없는 사진 방지를 위해 건너뜀');return out;}
+    out.matched=matched;
+    log('  · 인물 확인: '+matched+' / '+(person.en||'')+' ('+person.id+')');
     if(person.p18.length)try{await commonsQuery({titles:person.p18.map(f=>'File:'+f).join('|')},n,out,seen,width);}catch(_){}
     if(out.length<n&&person.cat)try{await commonsQuery({generator:'categorymembers',gcmtitle:'Category:'+person.cat,gcmtype:'file',gcmlimit:'50'},n,out,seen,width);}catch(_){}
     if(out.length<n&&person.en)try{await commonsQuery({generator:'search',gsrnamespace:'6',gsrsearch:'"'+person.en+'"'+($('photoOnly').checked?' filetype:bitmap':''),gsrlimit:'30'},n,out,seen,width);}catch(_){}
-    return out.slice(0,n);
+    if(out.length<n)try{await commonsQuery({generator:'search',gsrnamespace:'6',gsrsearch:'intitle:"'+matched+'"'+($('photoOnly').checked?' filetype:bitmap':''),gsrlimit:'30'},n,out,seen,width);}catch(_){}
+    const res=out.slice(0,n);res.matched=matched;return res;
   }
   await commonsQuery({generator:'search',gsrnamespace:'6',gsrsearch:q+($('photoOnly').checked?' filetype:bitmap':''),gsrlimit:'20'},n,out,seen,width);
   return out;
@@ -534,7 +545,7 @@ $('run').onclick=async()=>{
   let total=0;
   for(let i=0;i<rows.length;i++){
     const r=rows[i]; log(`[${i+1}/${rows.length}] "${r.q}" 사진 검색 중...`);
-    let imgs=[]; try{ imgs=await findImages(r.q,per,true); }catch(e){ log('  검색 실패: '+e.message); }
+    let imgs=[]; try{ imgs=await findImages(r.q,per,true,r.title); if(imgs.matched)r.q=imgs.matched; }catch(e){ log('  검색 실패: '+e.message); }
     const rowNo=i+2;
     const content=r.content.length>32760?r.content.slice(0,32760):r.content;
     if(r.content.length>32760)log('  기사 내용이 엑셀 셀 한도를 초과하여 32,760자로 잘랐습니다.');
