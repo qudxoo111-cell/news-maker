@@ -351,10 +351,21 @@ $('autoLoad').addEventListener('click',async()=>{
   const feedUrl=buildGoogleNewsFeed();
   $('feedSourceLink').href=feedUrl;
   try{
-    const {items,source}=await fetchLatestNews(feedUrl,Number($('autoCount').value));
+    const want=Number($('autoCount').value);
+    let {items,source}=await fetchLatestNews(feedUrl,want);
     const days=Number($('autoDays').value);
     const cutoff=Date.now()-days*86400000;
-    const fresh=normalizeNewsItems(items).filter(item=>item.pubDate&&item.pubDate.getTime()>=cutoff-60000);
+    const isFresh=item=>item.pubDate&&item.pubDate.getTime()>=cutoff-60000;
+    let fresh=normalizeNewsItems(items).filter(isFresh);
+    // 15개가 안 차면 연예 관련 검색 피드를 더 불러와 채움
+    if(fresh.length<want&&!$('autoKeyword').value.trim()&&$('autoCategory').value==='ENTERTAINMENT'){
+      for(const kw of ['연예','배우','아이돌','드라마','예능','가수']){
+        if(fresh.length>=want)break;
+        try{status.textContent='뉴스 '+fresh.length+'/'+want+'개 — "'+kw+'" 이슈 더 찾는 중…';
+          const u='https://news.google.com/rss/search?q='+encodeURIComponent(kw+' when:'+days+'d')+'&hl=ko&gl=KR&ceid=KR:ko';
+          const more=await fetchLatestNews(u,want);items=items.concat(more.items);fresh=normalizeNewsItems(items).filter(isFresh);}catch(_){}
+      }
+    }
     const selected=fresh.slice(0,Number($('autoCount').value));
     if(!selected.length)throw Error('선택한 기간 안에 날짜가 확인된 뉴스가 없습니다. 기간을 7일로 늘리거나 다른 검색어를 사용하세요.');
     feedMetadata.clear();
@@ -523,27 +534,47 @@ $('run').onclick=async()=>{
   }
   const buf=await wb.xlsx.writeBuffer();
   const xblob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  // 저장할 파일 목록 만들기 (엑셀 + 자막사진 + 사진원본)
+  const files=[{path:`news_${today}.xlsx`,blob:xblob}];
+  const safeName=q=>(q||'news').replace(/[\\/:*?"<>|\s]+/g,'_').slice(0,20);
+  let n=0;
+  for(const j of capJobs){
+    try{const png=await makeCaptionPng(j.src,cleanTitle(j.title),j.credit);
+      files.push({path:`자막사진_${String(j.no).padStart(2,'0')}_${safeName(j.q)}.png`,blob:png});n++;}catch(e){log('  자막사진 실패: '+j.q);}
+  }
+  for(const o of origJobs){
+    const b=await (await fetch(o.src)).blob();
+    files.push({path:`사진원본/${String(o.no).padStart(2,'0')}_${safeName(o.q)}_${o.k}.${o.ext==='png'?'png':'jpg'}`,blob:b});
+  }
+  window.nmLastResult={today,news:rows.length,photos:total,captions:n,originals:origJobs.length,files:files.length};
+  const folder='연예뉴스_'+today;
   const dir=await dirPromise;
+  let saved=false;
   if(dir){
     try{
-      const sub=await dir.getDirectoryHandle('연예뉴스_'+today,{create:true});
-      await writeFile(sub,`news_${today}.xlsx`,xblob);
-      if(origJobs.length){const od=await sub.getDirectoryHandle('사진원본',{create:true});
-        for(const o of origJobs){const safe=(o.q||'news').replace(/[\\/:*?"<>|\s]+/g,'_').slice(0,20);
-          const b=await (await fetch(o.src)).blob();await writeFile(od,`${String(o.no).padStart(2,'0')}_${safe}_${o.k}.${o.ext==='png'?'png':'jpg'}`,b);}}
-      let n=0;
-      for(const j of capJobs){
-        const png=await makeCaptionPng(j.src,cleanTitle(j.title),j.credit);
-        const safe=(j.q||'news').replace(/[\\/:*?"<>|\s]+/g,'_').slice(0,20);
-        await writeFile(sub,`자막사진_${String(j.no).padStart(2,'0')}_${safe}.png`,png);n++;
+      const sub=await dir.getDirectoryHandle(folder,{create:true});
+      for(const f of files){
+        const parts=f.path.split('/');let d=sub;
+        for(const seg of parts.slice(0,-1))d=await d.getDirectoryHandle(seg,{create:true});
+        await writeFile(d,parts[parts.length-1],f.blob);
       }
-      log(`\n완료! 뉴스 ${rows.length}개, 사진 ${total}장 → [${dir.name}/연예뉴스_${today}] 폴더에 엑셀 1개 + 자막사진 ${n}장 + 사진원본 ${origJobs.length}장 저장`);
-    }catch(e){log('\n폴더 저장 실패: '+e.message+' → 엑셀만 다운로드 폴더로 받습니다.');dl(xblob);}
-  }else{
-    dl(xblob);
-    log(`\n완료! 뉴스 ${rows.length}개, 본문 ${rows.filter(r=>r.content).length}개, 사진 ${total}장 → news_${today}.xlsx (다운로드 폴더)`+($('autoSave').checked?'  ※ 폴더 선택을 취소해서 자막사진은 저장하지 않았어요.':''));
+      saved=true;
+      log(`\n완료! 뉴스 ${rows.length}개, 사진 ${total}장 → [${dir.name}/${folder}] 폴더에 엑셀 1개 + 자막사진 ${n}장 + 사진원본 ${origJobs.length}장 저장`);
+    }catch(e){log('\n폴더 저장 실패: '+e.message+' → ZIP 파일 하나로 다운로드합니다.');}
   }
-  function dl(b){const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=`news_${today}.xlsx`; document.body.appendChild(a); a.click(); setTimeout(()=>a.remove(),2000);}
+  if(!saved){
+    if(typeof JSZip!=='undefined'){
+      const zip=new JSZip();for(const f of files)zip.file(folder+'/'+f.path,f.blob);
+      const zb=await zip.generateAsync({type:'blob'});
+      dl(zb,folder+'.zip');
+      log(`\n완료! 뉴스 ${rows.length}개, 사진 ${total}장 → 다운로드 폴더에 ${folder}.zip (엑셀 + 자막사진 ${n}장 + 사진원본 ${origJobs.length}장)`);
+    }else{
+      dl(xblob,`news_${today}.xlsx`);
+      log(`\n완료! 뉴스 ${rows.length}개, 사진 ${total}장 → news_${today}.xlsx (다운로드 폴더)`);
+    }
+  }
+  window.nmLastResult.done=true;window.nmLastResult.saved=saved?'folder':'download';
+  function dl(b,name){window._nmLastBlob=b;const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=name; document.body.appendChild(a); a.click(); setTimeout(()=>a.remove(),2000);}
   $('run').disabled=false;
 };
 
@@ -884,5 +915,51 @@ $('oneClick').onclick=async()=>{
   }finally{btn.disabled=false;}
 };
 </script>
+<style>
+#nmLock{position:fixed;inset:0;z-index:9999;background:rgba(20,20,26,.92);display:flex;align-items:center;justify-content:center;padding:20px}
+#nmLock .box{background:#fff;border-radius:14px;max-width:520px;width:100%;padding:24px;font-family:"Malgun Gothic",sans-serif}
+#nmLock h3{margin:0 0 8px;font-size:19px}#nmLock p{font-size:13.5px;color:#555;line-height:1.6;margin:6px 0}
+#nmLock .dev{font:700 20px monospace;letter-spacing:1px;background:#f4f4f7;border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+#nmLock textarea{width:100%;height:70px;margin-top:6px;font:13px monospace;padding:8px;border:1px solid #ccc;border-radius:8px;min-height:0}
+#nmLock .msg{font-size:13px;margin-top:8px;min-height:18px}
+</style>
+<div id="nmLock" style="display:none"><div class="box">
+  <h3>🔒 프로그램 인증</h3>
+  <p>이 프로그램은 인증 코드가 있어야 쓸 수 있어요. 아래 <b>기기 코드</b>를 판매자에게 보내고, 받은 <b>인증 코드</b>를 붙여넣으세요.</p>
+  <div class="dev"><span id="nmDev">계산 중…</span><button class="gray" type="button" id="nmCopy">복사</button></div>
+  <p style="margin-top:14px"><b>인증 코드</b></p>
+  <textarea id="nmCode" placeholder="받은 인증 코드를 붙여넣으세요"></textarea>
+  <div style="margin-top:10px"><button type="button" id="nmOk">인증하기</button></div>
+  <div class="msg" id="nmMsg"></div>
+  <p style="font-size:12px;color:#999">인증 코드는 이 컴퓨터에서만 작동해요. 다른 컴퓨터에서는 새 코드가 필요합니다.</p>
+</div></div>
+<script>
+(function(){
+const PUB={"kty": "EC", "crv": "P-256", "x": "b_bJxpYmpfoZ0rMxwqmsSQFnvrM5FtEpLKNkgxYwK-M", "y": "EBQoKqCZnM3kVKEXVq95ZgsUfUla3ycWxbNbNkmi8lA"};
+async function nmDeviceId(){
+  let gl='';try{const c=document.createElement('canvas').getContext('webgl');const e=c.getExtension('WEBGL_debug_renderer_info');gl=String(c.getParameter(e?e.UNMASKED_RENDERER_WEBGL:c.RENDERER));}catch(_){}
+  const parts=['NM1',navigator.platform,navigator.hardwareConcurrency||'',navigator.deviceMemory||'',Intl.DateTimeFormat().resolvedOptions().timeZone,gl].join('|');
+  const h=new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(parts)));
+  const A='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let s='';for(let i=0;i<16;i++)s+=A[h[i]%32];
+  return s.match(/.{4}/g).join('-');
+}
+const b64u=s=>{s=s.replace(/\s+/g,'').replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';return Uint8Array.from(atob(s),c=>c.charCodeAt(0));};
+async function verify(dev,code){try{const k=await crypto.subtle.importKey('jwk',PUB,{name:'ECDSA',namedCurve:'P-256'},false,['verify']);
+  return await crypto.subtle.verify({name:'ECDSA',hash:'SHA-256'},k,b64u(code),new TextEncoder().encode('NEWSMAKER|'+dev));}catch(_){return false;}}
+(async()=>{
+  const lock=document.getElementById('nmLock');let dev='';
+  try{dev=await nmDeviceId();}catch(_){dev='UNKNOWN';}
+  document.getElementById('nmDev').textContent=dev;
+  let saved='';try{saved=localStorage.getItem('nm_license')||'';}catch(_){}
+  if(saved&&await verify(dev,saved))return;
+  lock.style.display='flex';
+  document.getElementById('nmCopy').onclick=()=>{try{navigator.clipboard.writeText(dev);}catch(_){}document.getElementById('nmMsg').textContent='기기 코드를 복사했어요.';};
+  document.getElementById('nmOk').onclick=async()=>{const c=document.getElementById('nmCode').value.trim();const m=document.getElementById('nmMsg');
+    if(await verify(dev,c)){try{localStorage.setItem('nm_license',c);}catch(_){}m.style.color='#137146';m.textContent='✔ 인증됐어요!';setTimeout(()=>lock.remove(),600);}
+    else{m.style.color='#b42318';m.textContent='인증 코드가 맞지 않아요. 이 컴퓨터의 기기 코드로 받은 코드인지 확인해 주세요.';}};
+})();
+})();
+</script>
 </body>
+
 </html>
