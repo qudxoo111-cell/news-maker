@@ -508,7 +508,7 @@ async function ensureDir(){ // 클릭 직후(사용자 동작 안)에서 호출
 }
 $('pickFolder').onclick=async()=>{if(!window.showDirectoryPicker){alert('이 브라우저는 폴더 저장을 지원하지 않아요. 크롬이나 엣지를 써 주세요.');return;}try{await chooseDir();}catch(_){}}
 async function writeFile(dir,name,blob){const fh=await dir.getFileHandle(name,{create:true});const w=await fh.createWritable();await w.write(blob);await w.close();}
-function cleanTitle(t){return (t||'').replace(/\s+-\s+[^-]{1,25}$/,'').trim();}
+function cleanTitle(t){t=(t||'').replace(/&gt;/g,'>').replace(/&lt;/g,'<').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&amp;/g,'&');return t.replace(/\s+-\s+[^-]{1,25}$/,'').replace(/\s*>\s*[^>]{1,15}$/,'').trim();}
 async function makeCaptionPng(src,caption,credit){
   const img=(src instanceof Blob)?await createImageBitmap(src):await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=src;});
   const c=document.createElement('canvas');c.width=1080;c.height=1350;const x=c.getContext('2d');
