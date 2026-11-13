@@ -443,14 +443,19 @@ async function commonsQuery(extra,n,out,seen,width){
 }
 // 위키데이터로 인물·그룹을 정확히 찾아 그 사람의 사진만 가져오기
 const WD='https://www.wikidata.org/w/api.php';
-const PERSONISH=new Set(['Q5','Q215380','Q641066','Q216337','Q9212979','Q2088357','Q5741069','Q105543609']);
+const PERSONISH=new Set(['Q5','Q215380','Q641066','Q216337','Q9212979']);
+const CELEB_RE=/배우|가수|방송인|코미디언|개그맨|개그우먼|모델|아이돌|걸그룹|보이그룹|그룹|감독|아나운서|유튜버|작가|선수|래퍼|MC|작곡가|프로듀서|actor|actress|singer|rapper|entertainer|comedian|presenter|television|idol|girl group|boy band|K-pop|South Korean/i;
 async function wikidataPerson(q){
   const s=await (await fetch(WD+'?'+new URLSearchParams({action:'wbsearchentities',search:q,language:'ko',uselang:'ko',type:'item',limit:'7',format:'json',origin:'*'}))).json();
   const ids=(s.search||[]).map(x=>x.id);if(!ids.length)return null;
-  const e=await (await fetch(WD+'?'+new URLSearchParams({action:'wbgetentities',ids:ids.join('|'),props:'claims|labels',languages:'en|ko',format:'json',origin:'*'}))).json();
+  const e=await (await fetch(WD+'?'+new URLSearchParams({action:'wbgetentities',ids:ids.join('|'),props:'claims|labels|descriptions|aliases',languages:'en|ko',format:'json',origin:'*'}))).json();
   for(const id of ids){const en=e.entities?.[id];if(!en)continue;
     const p31=(en.claims?.P31||[]).map(c=>c.mainsnak?.datavalue?.value?.id);
     if(!p31.some(x=>PERSONISH.has(x)))continue;
+    const ko=en.labels?.ko?.value||'';const al=(en.aliases?.ko||[]).map(a=>a.value);
+    if(ko!==q&&!al.includes(q))continue; // 이름이 정확히 같아야 함
+    const desc=(en.descriptions?.ko?.value||'')+' '+(en.descriptions?.en?.value||'');
+    if(!CELEB_RE.test(desc))continue; // 연예·방송 관련 인물만
     return {id,en:en.labels?.en?.value||'',p18:(en.claims?.P18||[]).map(c=>c.mainsnak?.datavalue?.value).filter(Boolean),cat:en.claims?.P373?.[0]?.mainsnak?.datavalue?.value||''};}
   return null;
 }
