@@ -133,6 +133,8 @@ td img{height:64px;margin-right:4px;border-radius:4px}
       <label>뉴스당 사진 수 <select id="per"><option>1</option><option>2</option><option selected>3</option></select></label>
       <label><input type="checkbox" id="freeOnly" checked> 자유 라이선스(CC·퍼블릭 도메인)만</label>
       <label><input type="checkbox" id="photoOnly" checked> 사진만 (로고·그림 제외)</label>
+      <label><input type="checkbox" id="autoSave" checked> <b>폴더에 자동 저장</b> (엑셀 + 뉴스별 자막사진 PNG)</label>
+      <button class="gray" id="pickFolder" type="button">저장 폴더 바꾸기</button> <span id="folderName" style="font-size:13px;color:#666"></span>
     </div>
   </div>
 
@@ -427,7 +429,41 @@ async function toBase64(url){
   return {base64:dataUrl, w:img.naturalWidth, h:img.naturalHeight, ext:/png/i.test(b.type)?'png':'jpeg'};
 }
 
+
+/* ===== 자동 저장: 폴더 핸들 기억 + 자막사진 생성 ===== */
+const IDB={db:null,async open(){if(this.db)return this.db;return this.db=await new Promise((res,rej)=>{const q=indexedDB.open('newsmaker',1);q.onupgradeneeded=()=>q.result.createObjectStore('kv');q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error);});},
+ async get(k){const d=await this.open();return new Promise(r=>{const t=d.transaction('kv').objectStore('kv').get(k);t.onsuccess=()=>r(t.result);t.onerror=()=>r(null);});},
+ async set(k,v){const d=await this.open();return new Promise(r=>{const t=d.transaction('kv','readwrite').objectStore('kv').put(v,k);t.onsuccess=()=>r();t.onerror=()=>r();});}};
+let saveDir=null;
+(async()=>{try{const h=await IDB.get('dir');if(h){saveDir=h;$('folderName').textContent='저장 위치: '+h.name;}}catch(_){}})();
+async function chooseDir(){
+  const h=await window.showDirectoryPicker({id:'newsmaker',mode:'readwrite',startIn:'desktop'});
+  saveDir=h;await IDB.set('dir',h);$('folderName').textContent='저장 위치: '+h.name;return h;}
+async function ensureDir(){ // 클릭 직후(사용자 동작 안)에서 호출
+  if(!window.showDirectoryPicker)return null;
+  if(saveDir){try{let p=await saveDir.queryPermission({mode:'readwrite'});if(p!=='granted')p=await saveDir.requestPermission({mode:'readwrite'});if(p==='granted')return saveDir;}catch(_){}}
+  try{return await chooseDir();}catch(_){return null;}
+}
+$('pickFolder').onclick=async()=>{if(!window.showDirectoryPicker){alert('이 브라우저는 폴더 저장을 지원하지 않아요. 크롬이나 엣지를 써 주세요.');return;}try{await chooseDir();}catch(_){}}
+async function writeFile(dir,name,blob){const fh=await dir.getFileHandle(name,{create:true});const w=await fh.createWritable();await w.write(blob);await w.close();}
+function cleanTitle(t){return (t||'').replace(/\s+-\s+[^-]{1,25}$/,'').trim();}
+async function makeCaptionPng(dataUrl,caption,credit){
+  const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=dataUrl;});
+  const c=document.createElement('canvas');c.width=1080;c.height=1350;const x=c.getContext('2d');
+  const ir=img.width/img.height,br=c.width/c.height;let sw,sh,sx,sy;
+  if(ir>br){sh=img.height;sw=sh*br;sx=(img.width-sw)/2;sy=0}else{sw=img.width;sh=sw/br;sx=0;sy=(img.height-sh)/4}
+  x.drawImage(img,sx,sy,sw,sh,0,0,c.width,c.height);
+  const size=60;x.font='900 '+size+'px "Malgun Gothic","맑은 고딕",sans-serif';x.textAlign='center';x.textBaseline='middle';
+  const lines=[];for(const para of caption.split('\n')){let line='';for(const ch of para){const t=line+ch;if(x.measureText(t).width>c.width-140&&line){const sp=line.lastIndexOf(' ');if(sp>line.length*0.5){lines.push(line.slice(0,sp));line=line.slice(sp+1)+ch;}else{lines.push(line);line=ch;}}else line=t;}lines.push(line);}
+  const L=lines.slice(0,4),lh=size*1.3,h=L.length*lh,y0=c.height-h-130;
+  x.fillStyle='rgba(0,0,0,.62)';x.fillRect(0,y0-size*0.45,c.width,h+size*0.9);
+  x.fillStyle='#fff';L.forEach((l,i)=>x.fillText(l,c.width/2,y0+lh*i+lh/2));
+  if(credit){x.font='22px "Malgun Gothic",sans-serif';x.textAlign='right';x.textBaseline='alphabetic';x.lineWidth=4;x.strokeStyle='rgba(0,0,0,.7)';x.strokeText(credit,c.width-24,c.height-24);x.fillStyle='rgba(255,255,255,.92)';x.fillText(credit,c.width-24,c.height-24);}
+  return await new Promise(r=>c.toBlob(r,'image/png'));
+}
 $('run').onclick=async()=>{
+  const dirPromise=$('autoSave').checked?ensureDir():Promise.resolve(null);
+  const capJobs=[];
   const rows=parse(); if(!rows.length){alert('1번에 뉴스 목록을 넣어 주세요.');return;}
   if(typeof ExcelJS==='undefined'){alert('엑셀 모듈을 불러오지 못했어요. 파일을 다시 받아 주세요.');return;}
   const articleCount=parseArticles().filter(Boolean).length;
@@ -474,7 +510,7 @@ $('run').onclick=async()=>{
         const id=wb.addImage({base64:d.base64,extension:d.ext});
         const s=Math.min((CELLW-8)/d.w,(CELLH-8)/d.h);
         ws.addImage(id,{tl:{col:6+k+0.05,row:rowNo-1+0.05},ext:{width:Math.round(d.w*s),height:Math.round(d.h*s)},editAs:'oneCell'});
-        const im=document.createElement('img'); im.src=d.base64; try{capAdd(d.base64,'Photo: '+imgs[k].artist+' / '+imgs[k].license+' (Wikimedia Commons)',r.title);}catch(_){} tr.children[3].appendChild(im); total++;
+        const im=document.createElement('img'); im.src=d.base64; try{capAdd(d.base64,'Photo: '+imgs[k].artist+' / '+imgs[k].license+' (Wikimedia Commons)',r.title);}catch(_){} if(k===0)capJobs.push({no:i+1,q:r.q,title:r.title,src:d.base64,credit:'Photo: '+imgs[k].artist+' / '+imgs[k].license+' (Wikimedia Commons)'}); tr.children[3].appendChild(im); total++;
       }catch(e){ log('  사진 받기 실패: '+imgs[k].title); }
       await sleep(300);
     }
@@ -482,9 +518,25 @@ $('run').onclick=async()=>{
     $('previewBody').appendChild(tr);
   }
   const buf=await wb.xlsx.writeBuffer();
-  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
-  a.download=`news_${today}.xlsx`; document.body.appendChild(a); a.click(); setTimeout(()=>a.remove(),2000);
-  log(`\n완료! 뉴스 ${rows.length}개, 본문 ${rows.filter(r=>r.content).length}개, 사진 ${total}장 → news_${today}.xlsx (다운로드 폴더)`);
+  const xblob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  const dir=await dirPromise;
+  if(dir){
+    try{
+      const sub=await dir.getDirectoryHandle('연예뉴스_'+today,{create:true});
+      await writeFile(sub,`news_${today}.xlsx`,xblob);
+      let n=0;
+      for(const j of capJobs){
+        const png=await makeCaptionPng(j.src,cleanTitle(j.title),j.credit);
+        const safe=(j.q||'news').replace(/[\\/:*?"<>|\s]+/g,'_').slice(0,20);
+        await writeFile(sub,`자막사진_${String(j.no).padStart(2,'0')}_${safe}.png`,png);n++;
+      }
+      log(`\n완료! 뉴스 ${rows.length}개, 사진 ${total}장 → [${dir.name}/연예뉴스_${today}] 폴더에 엑셀 1개 + 자막사진 ${n}장 저장`);
+    }catch(e){log('\n폴더 저장 실패: '+e.message+' → 엑셀만 다운로드 폴더로 받습니다.');dl(xblob);}
+  }else{
+    dl(xblob);
+    log(`\n완료! 뉴스 ${rows.length}개, 본문 ${rows.filter(r=>r.content).length}개, 사진 ${total}장 → news_${today}.xlsx (다운로드 폴더)`+($('autoSave').checked?'  ※ 폴더 선택을 취소해서 자막사진은 저장하지 않았어요.':''));
+  }
+  function dl(b){const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=`news_${today}.xlsx`; document.body.appendChild(a); a.click(); setTimeout(()=>a.remove(),2000);}
   $('run').disabled=false;
 };
 
