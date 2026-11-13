@@ -96,10 +96,10 @@ td img{height:64px;margin-right:4px;border-radius:4px}
           <select id="autoCategory"><option value="ENTERTAINMENT" selected>연예 뉴스</option><option value="TOP">종합 뉴스</option><option value="BUSINESS">경제 뉴스</option><option value="SPORTS">스포츠 뉴스</option><option value="TECHNOLOGY">IT·기술 뉴스</option></select>
         </label>
         <label class="auto-field">기간
-          <select id="autoDays"><option value="1">최근 24시간</option><option value="3" selected>최근 3일</option><option value="7">최근 7일</option></select>
+          <select id="autoDays"><option value="1" selected>최근 24시간</option><option value="3">최근 3일</option><option value="7">최근 7일</option></select>
         </label>
         <label class="auto-field">가져올 기사 수
-          <select id="autoCount"><option value="5">5개</option><option value="10" selected>10개</option><option value="15">15개</option><option value="20">20개</option></select>
+          <select id="autoCount"><option value="5">5개</option><option value="10">10개</option><option value="15" selected>15개</option><option value="20">20개</option></select>
         </label>
         <label class="auto-field">특정 인물·키워드 (선택)
           <input id="autoKeyword" type="text" maxlength="100" placeholder="예: 아이유, 이정재" autocomplete="off">
@@ -140,7 +140,11 @@ td img{height:64px;margin-right:4px;border-radius:4px}
 
   <div class="card">
     <h2><span class="step">3</span>기사 본문 + 사진 엑셀 만들기</h2>
-    <button id="run">기사 내용·사진 포함 엑셀 다운로드</button>
+    <div style="background:#fff0f5;border:1px solid #f3c4d4;border-radius:10px;padding:12px 14px;margin-bottom:12px">
+      <button id="oneClick" type="button">⚡ 오늘 이슈 15개 한 번에 만들기</button>
+      <div class="hint" style="margin-top:8px">버튼 하나로 <b>최근 24시간 연예 이슈 15개 불러오기 → 뉴스당 사진 5장 → 엑셀 + 자막사진 + 사진원본</b>을 저장 폴더에 만듭니다. (몇 분 걸려요. 창을 닫지 마세요)</div>
+    </div>
+    <button id="run" class="gray">지금 입력된 목록으로만 엑셀 만들기</button>
     <div id="log">대기 중</div>
     <table id="preview"><thead><tr><th>번호</th><th>뉴스 제목</th><th>기사 내용</th><th>사진 미리보기</th></tr></thead><tbody id="previewBody"></tbody></table>
   </div>
@@ -863,6 +867,22 @@ $('capSave').onclick=()=>{if(!img){bot('먼저 사진을 골라 주세요.');ret
   const a=document.createElement('a');a.href=cv.toDataURL('image/png');a.download='자막사진_'+Date.now()+'.png';document.body.appendChild(a);a.click();a.remove();};
 draw();
 })();
+/* ===== 하루 15개 한 번에 ===== */
+$('oneClick').onclick=async()=>{
+  const btn=$('oneClick');btn.disabled=true;
+  try{
+    if($('autoSave').checked){const d=await ensureDir();if(!d){btn.disabled=false;alert('저장 폴더를 골라야 시작할 수 있어요.');return;}}
+    $('autoDays').value='1';$('autoCount').value='15';$('per').value='5';
+    $('news').value='';$('articles').value='';updateCounts();
+    $('log').textContent='① 오늘 이슈 15개 불러오는 중…';
+    $('autoLoad').click();
+    await new Promise(r=>setTimeout(r,300));
+    for(let i=0;i<120&&$('autoLoad').disabled;i++)await new Promise(r=>setTimeout(r,500));
+    if(!parse().length){$('log').textContent='뉴스를 불러오지 못했어요: '+$('autoStatus').textContent;return;}
+    $('log').textContent='② 뉴스 '+parse().length+'개 확인 → 사진 찾고 엑셀 만드는 중…';
+    $('run').click();
+  }finally{btn.disabled=false;}
+};
 </script>
 </body>
 </html>
