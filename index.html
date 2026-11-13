@@ -464,8 +464,8 @@ function nmCandidates(q,title){
   const c=[];const add=t=>{t=(t||'').trim();if(t.length>=2&&t.length<=12&&!NM_STOP.has(t)&&!c.includes(t))c.push(t);};
   add(q);
   const toks=(cleanTitle(title||'').match(/[가-힣]{2,6}|[A-Za-z][A-Za-z.\-]+(?:\s+[A-Za-z][A-Za-z.\-]+)?/g)||[]);
-  for(const t of toks){add(t);if(/[은는이가의과와을를도랑]$/.test(t)&&t.length>=3)add(t.slice(0,-1));if(t.length===4)add(t.slice(0,3));}
-  return c.slice(0,10);
+  toks.forEach((t,i)=>{const nx=toks[i+1];if(nx&&/^[가-힣]+$/.test(t)&&/^[가-힣]+$/.test(nx))add(t+' '+nx);add(t);if(/[은는이가의과와을를도랑]$/.test(t)&&t.length>=3)add(t.slice(0,-1));if(t.length===4)add(t.slice(0,3));});
+  return c.slice(0,16);
 }
 async function findImages(q,n,big,title){
   const width=big?'1920':'480';const out=[],seen=new Set();
