@@ -162,8 +162,8 @@ td img{height:64px;margin-right:4px;border-radius:4px}
       <label><input type="checkbox" id="cardUseArticle" checked> 기사 본문 요약 사용</label>
     </div>
     <div class="button-row">
-      <button id="makeCards" type="button">카드뉴스 5장 만들기</button>
-      <button class="gray" id="downloadCards" type="button" disabled>PNG 5장 다운로드</button>
+      <button id="makeCards" type="button">카드뉴스 3장 만들기</button>
+      <button class="gray" id="downloadCards" type="button" disabled>PNG 3장 다운로드</button>
       <span id="cardStatus" class="card-status">뉴스를 입력한 뒤 원하는 번호를 선택하고 카드뉴스를 만드세요.</span>
     </div>
     <div id="cardPreview" class="card-grid"></div>
@@ -744,92 +744,84 @@ function drawBulletList(ctx,items,x,y,maxWidth,lineHeight,color='#111'){
   });
 }
 function createCanvas(){ const c=document.createElement('canvas'); c.width=1080; c.height=1350; return c; }
+function drawBulletsBig(ctx,items,x,y,maxWidth,size,lineHeight,maxY,color='#111'){
+  ctx.fillStyle=color;
+  for(const item of items){
+    ctx.font=size+'px "Malgun Gothic", sans-serif';
+    const lines=wrapText(ctx,item,maxWidth-44);
+    if(y+lines.length*lineHeight>maxY) break;
+    ctx.font='700 '+size+'px "Malgun Gothic", sans-serif'; ctx.fillText('•',x,y);
+    ctx.font=size+'px "Malgun Gothic", sans-serif';
+    lines.forEach((line,j)=>ctx.fillText(line,x+40,y+j*lineHeight));
+    y+=lines.length*lineHeight+Math.round(lineHeight*0.55);
+  }
+  return y;
+}
 function renderCardSet(item,bgImg,style='modern'){
-  const blocks=makeBulletGroups(item);
   const title=chunkText(safeText(item.title||item.q||'뉴스 카드뉴스'),56);
-  const cards=[];
+  const content=safeText(item.content||'');
+  const pieces=splitSentences(content);
+  const intro=chunkText(pieces[0]||content||'핵심 소식을 한눈에 정리했습니다.',100);
+  const middle=pieces.slice(1,Math.max(1,pieces.length-1)).map(v=>chunkText(v,120));
+  const closing=chunkText(pieces.length>1?pieces[pieces.length-1]:(content||title),110);
   const accent=style==='magazine' ? '#7c3aed' : '#e8457a';
   const accentDark=style==='magazine' ? '#111827' : '#1b1b1f';
-
-  // card 1 cover
+  const cards=[];
+  // 1/3 cover
   {
     const c=createCanvas(), ctx=c.getContext('2d');
     ctx.fillStyle='#111'; ctx.fillRect(0,0,c.width,c.height);
-    if(bgImg) drawImageCover(ctx,bgImg,0,0,c.width,c.height,0.42);
+    if(bgImg) drawImageCover(ctx,bgImg,0,0,c.width,c.height,0.38);
     const grd=ctx.createLinearGradient(0,0,0,c.height);
-    grd.addColorStop(0,'rgba(0,0,0,.18)'); grd.addColorStop(1,'rgba(0,0,0,.68)');
+    grd.addColorStop(0,'rgba(0,0,0,.10)'); grd.addColorStop(.45,'rgba(0,0,0,.25)'); grd.addColorStop(1,'rgba(0,0,0,.82)');
     ctx.fillStyle=grd; ctx.fillRect(0,0,c.width,c.height);
-    drawRoundedRect(ctx,70,78,210,56,28,'rgba(255,255,255,.14)','rgba(255,255,255,.2)');
-    ctx.fillStyle='#fff'; ctx.font='700 24px "Malgun Gothic", sans-serif'; ctx.fillText('NEWS CARD',110,114);
-    ctx.fillStyle='#fff'; ctx.font='700 60px "Malgun Gothic", sans-serif';
-    wrapText(ctx,title,880).slice(0,3).forEach((line,i)=>ctx.fillText(line,80,760+i*78));
-    ctx.fillStyle='rgba(255,255,255,.92)'; ctx.font='28px "Malgun Gothic", sans-serif';
-    drawParagraph(ctx,blocks.intro,84,990,860,40,3,'rgba(255,255,255,.92)');
-    drawRoundedRect(ctx,78,1148,320,74,24,accent,null);
-    ctx.fillStyle='#fff'; ctx.font='700 30px "Malgun Gothic", sans-serif'; ctx.fillText((blocks.coverTag||'연예 뉴스').slice(0,18),112,1194);
-    ctx.fillStyle='rgba(255,255,255,.7)'; ctx.font='24px "Malgun Gothic", sans-serif'; ctx.fillText(domainOf(item.link)||'출처 링크 포함',80,1288);
+    drawRoundedRect(ctx,70,78,240,64,32,accent,null);
+    ctx.fillStyle='#fff'; ctx.font='700 30px "Malgun Gothic", sans-serif'; ctx.fillText('오늘의 이슈',104,121);
+    ctx.font='800 80px "Malgun Gothic", sans-serif';
+    const tl=wrapText(ctx,title,920).slice(0,4);
+    let y=1150-tl.length*96-130;
+    ctx.fillStyle='#fff'; ctx.shadowColor='rgba(0,0,0,.6)'; ctx.shadowBlur=14;
+    tl.forEach((line,i)=>ctx.fillText(line,76,y+i*96));
+    ctx.shadowBlur=0;
+    ctx.font='38px "Malgun Gothic", sans-serif';
+    drawParagraph(ctx,intro,80,y+tl.length*96+40,920,54,3,'rgba(255,255,255,.95)');
+    ctx.fillStyle='rgba(255,255,255,.75)'; ctx.font='28px "Malgun Gothic", sans-serif'; ctx.fillText((domainOf(item.link)||'')+'   1 / 3',80,1290);
     cards.push({title:'1_표지',canvas:c});
   }
-  // card 2
-  {
-    const c=createCanvas(), ctx=c.getContext('2d');
-    ctx.fillStyle='#f6f7fb'; ctx.fillRect(0,0,c.width,c.height);
-    if(bgImg) drawImageCover(ctx,bgImg,0,0,c.width,370,0.25); else {ctx.fillStyle=accentDark;ctx.fillRect(0,0,c.width,370);} 
-    drawRoundedRect(ctx,54,300,972,980,34,'#fff','#ececf1');
-    drawRoundedRect(ctx,84,340,170,48,24,accent,null);
-    ctx.fillStyle='#fff'; ctx.font='700 24px "Malgun Gothic", sans-serif'; ctx.fillText('핵심 요약',127,373);
-    ctx.fillStyle='#111'; ctx.font='700 46px "Malgun Gothic", sans-serif';
-    wrapText(ctx,title,850).slice(0,2).forEach((line,i)=>ctx.fillText(line,84,470+i*60));
-    ctx.fillStyle='#444'; ctx.font='31px "Malgun Gothic", sans-serif';
-    drawParagraph(ctx,blocks.headline,88,620,900,46,4,'#30323a');
-    drawBulletList(ctx,blocks.group1,96,840,880,38,'#111');
-    ctx.fillStyle='#666'; ctx.font='24px "Malgun Gothic", sans-serif'; ctx.fillText('2 / 5',920,1240);
-    cards.push({title:'2_핵심요약',canvas:c});
-  }
-  // card 3
-  {
-    const c=createCanvas(), ctx=c.getContext('2d');
-    ctx.fillStyle='#fff'; ctx.fillRect(0,0,c.width,c.height);
-    drawRoundedRect(ctx,60,70,960,1210,34,'#fff','#ececf1');
-    if(bgImg) drawImageCover(ctx,bgImg,60,70,960,330,0.35); else {ctx.fillStyle=accentDark;ctx.fillRect(60,70,960,330);} 
-    ctx.fillStyle='#fff'; ctx.font='700 48px "Malgun Gothic", sans-serif'; ctx.fillText('기사 포인트',92,350);
-    drawRoundedRect(ctx,88,442,180,48,24,accent,null);
-    ctx.fillStyle='#fff'; ctx.font='700 24px "Malgun Gothic", sans-serif'; ctx.fillText('내용 정리',135,475);
-    ctx.fillStyle='#111'; ctx.font='700 44px "Malgun Gothic", sans-serif'; ctx.fillText('이 내용만 보면 됩니다',88,560);
-    drawBulletList(ctx,blocks.group1,95,670,860,40,'#111');
-    ctx.fillStyle='#666'; ctx.font='24px "Malgun Gothic", sans-serif'; ctx.fillText('3 / 5',920,1240);
-    cards.push({title:'3_내용정리',canvas:c});
-  }
-  // card 4
+  // 2/3 main content
   {
     const c=createCanvas(), ctx=c.getContext('2d');
     ctx.fillStyle='#f4f4f8'; ctx.fillRect(0,0,c.width,c.height);
-    drawRoundedRect(ctx,60,70,960,1210,34,'#fff','#ececf1');
-    ctx.fillStyle=accentDark; ctx.fillRect(60,70,960,220);
-    ctx.fillStyle='#fff'; ctx.font='700 52px "Malgun Gothic", sans-serif'; ctx.fillText('추가 포인트',88,202);
-    ctx.fillStyle='#404452'; ctx.font='30px "Malgun Gothic", sans-serif';
-    drawParagraph(ctx,blocks.intro,90,360,880,42,3,'#404452');
-    drawBulletList(ctx,blocks.group2,95,560,860,40,'#111');
-    ctx.fillStyle='#666'; ctx.font='24px "Malgun Gothic", sans-serif'; ctx.fillText('4 / 5',920,1240);
-    cards.push({title:'4_추가포인트',canvas:c});
+    if(bgImg) drawImageCover(ctx,bgImg,0,0,c.width,300,0.3); else {ctx.fillStyle=accentDark;ctx.fillRect(0,0,c.width,300);}
+    drawRoundedRect(ctx,40,230,1000,1080,36,'#fff','#e6e6ee');
+    drawRoundedRect(ctx,80,272,200,58,29,accent,null);
+    ctx.fillStyle='#fff'; ctx.font='700 30px "Malgun Gothic", sans-serif'; ctx.fillText('핵심 내용',117,312);
+    let y=410;
+    const items=middle.length?middle:[intro];
+    let size=42,lh=60;
+    ctx.font=size+'px "Malgun Gothic", sans-serif';
+    const need=items.reduce((s,t)=>s+wrapText(ctx,t,876).length*lh+lh*0.55,0);
+    if(need>860){size=38;lh=54;}
+    drawBulletsBig(ctx,items,84,y,920,size,lh,1250,'#16171c');
+    ctx.fillStyle='#777'; ctx.font='28px "Malgun Gothic", sans-serif'; ctx.fillText('2 / 3',935,1285);
+    cards.push({title:'2_핵심내용',canvas:c});
   }
-  // card 5 closing
+  // 3/3 closing
   {
     const c=createCanvas(), ctx=c.getContext('2d');
     ctx.fillStyle='#111'; ctx.fillRect(0,0,c.width,c.height);
-    if(bgImg) drawImageCover(ctx,bgImg,0,0,c.width,c.height,0.52);
-    drawRoundedRect(ctx,70,80,940,1190,34,'rgba(255,255,255,.06)','rgba(255,255,255,.18)');
-    ctx.fillStyle='#fff'; ctx.font='700 54px "Malgun Gothic", sans-serif'; ctx.fillText('마무리 정리',96,200);
-    drawRoundedRect(ctx,94,248,180,48,24,accent,null);
-    ctx.fillStyle='#fff'; ctx.font='700 24px "Malgun Gothic", sans-serif'; ctx.fillText('한눈에 보기',142,281);
-    ctx.font='34px "Malgun Gothic", sans-serif';
-    drawParagraph(ctx,blocks.closing,96,390,860,52,5,'rgba(255,255,255,.95)');
-    drawRoundedRect(ctx,92,960,890,180,24,'rgba(255,255,255,.12)',null);
-    ctx.fillStyle='#fff'; ctx.font='700 28px "Malgun Gothic", sans-serif'; ctx.fillText('출처 링크',126,1018);
-    ctx.font='26px "Malgun Gothic", sans-serif';
-    drawParagraph(ctx,item.link||'링크 없음',126,1070,810,38,3,'rgba(255,255,255,.92)');
-    ctx.fillStyle='rgba(255,255,255,.75)'; ctx.font='24px "Malgun Gothic", sans-serif'; ctx.fillText('5 / 5',920,1228);
-    cards.push({title:'5_마무리',canvas:c});
+    if(bgImg) drawImageCover(ctx,bgImg,0,0,c.width,c.height,0.58);
+    drawRoundedRect(ctx,60,70,960,1210,36,'rgba(0,0,0,.25)','rgba(255,255,255,.2)');
+    ctx.fillStyle='#fff'; ctx.font='800 64px "Malgun Gothic", sans-serif'; ctx.fillText('한눈에 정리',100,200);
+    drawRoundedRect(ctx,100,236,120,10,5,accent,null);
+    ctx.font='46px "Malgun Gothic", sans-serif';
+    drawParagraph(ctx,closing,100,360,880,68,7,'#fff');
+    drawRoundedRect(ctx,96,1000,888,190,26,'rgba(255,255,255,.14)',null);
+    ctx.fillStyle='#fff'; ctx.font='700 32px "Malgun Gothic", sans-serif'; ctx.fillText('출처',130,1060);
+    ctx.font='28px "Malgun Gothic", sans-serif';
+    drawParagraph(ctx,item.link||'링크 없음',130,1112,820,40,2,'rgba(255,255,255,.9)');
+    ctx.fillStyle='rgba(255,255,255,.75)'; ctx.font='28px "Malgun Gothic", sans-serif'; ctx.fillText('3 / 3',920,1250);
+    cards.push({title:'3_마무리',canvas:c});
   }
   return cards;
 }
@@ -888,8 +880,10 @@ $('makeCards').addEventListener('click', async()=>{
     status.textContent='카드뉴스 레이아웃 생성 중...';
     generatedCards=renderCardSet(item,bgImg,$('cardStyle').value);
     renderCardPreview(generatedCards,item,bgMeta);
+    window.nmLast={item,bgMeta,person:(item.title||'').split(/[,·\s]/)[0]};
+    nmSaveForIG();
     $('downloadCards').disabled=false;
-    status.textContent='완료! 5장 카드뉴스 미리보기가 생성되었습니다.';
+    status.textContent='완료! 3장 카드뉴스 미리보기가 생성되었습니다.';
   }catch(e){
     console.error(e);
     status.textContent='카드뉴스 생성 실패: '+e.message;
@@ -1019,6 +1013,59 @@ async function verify(dev,code){try{const k=await crypto.subtle.importKey('jwk',
 })();
 })();
 </script>
+<script>
+/* ===== 인스타 바로 올리기 (카드 3장 + 무음 릴스) ===== */
+function nmCaption(){
+  const L=window.nmLast; if(!L) return '';
+  const it=L.item, m=L.bgMeta;
+  const body=splitSentences(safeText(it.content||'')).join('\n\n');
+  const name=(m&&m.matchedName)||'';
+  const tags=['#연예뉴스','#오늘의핫이슈','#핫이슈'];
+  const nm=(L.person||'').replace(/\s/g,''); if(nm) tags.unshift('#'+nm);
+  return safeText(it.title)+'\n\n'+body+'\n\n'+
+    '📰 참고: '+(domainOf(it.link)||it.link||'')+' 보도\n'+
+    (m?'📷 사진: '+(m.artist||'')+' / Wikimedia Commons ('+(m.license||'')+') - '+(m.title||'').replace(/\.[a-z]+$/i,''):'')+'\n\n'+tags.join(' ');
+}
+async function nmSaveForIG(){
+  try{
+    const files=await Promise.all(generatedCards.map((c,i)=>new Promise(r=>c.canvas.toBlob(b=>r({name:'card_'+(i+1)+'.jpg',blob:b,type:'image/jpeg'}),'image/jpeg',0.92))));
+    await IDB.set('igCards',{files,caption:nmCaption(),ts:Date.now()});
+    $('cardStatus').textContent+=' · 인스타 업로드용 보관 완료';
+  }catch(e){console.error(e);}
+}
+async function nmMakeReel(){
+  if(!generatedCards.length){alert('먼저 카드뉴스를 만들어 주세요.');return;}
+  const btn=$('makeReel'); btn.disabled=true;
+  const cv=document.createElement('canvas');cv.width=1080;cv.height=1920;const x=cv.getContext('2d');
+  const imgs=generatedCards.map(c=>c.canvas), D=3, T=0.5, n=imgs.length, total=n*D;
+  function card(img,a,z){x.save();x.globalAlpha=a;
+    x.filter='blur(40px) brightness(0.5)';x.drawImage(img,-60,-60,1200,2040);x.filter='none';
+    const w=1080*z,h=1350*z;x.beginPath();x.rect(0,285,1080,1350);x.clip();x.drawImage(img,(1080-w)/2,285+(1350-h)/2,w,h);x.restore();}
+  function draw(t){x.fillStyle='#000';x.fillRect(0,0,1080,1920);const i=Math.min(n-1,Math.floor(t/D)),lt=t-i*D;
+    card(imgs[i],1,1+0.05*lt/D); if(i<n-1&&lt>D-T) card(imgs[i+1],(lt-(D-T))/T,1);
+    x.fillStyle='rgba(255,255,255,.25)';x.fillRect(140,1740,800,8);x.fillStyle='#e8457a';x.fillRect(140,1740,800*Math.min(1,t/total),8);}
+  const types=['video/mp4;codecs=avc1.640028','video/mp4','video/webm'];const type=types.find(t=>MediaRecorder.isTypeSupported(t));
+  const rec=new MediaRecorder(cv.captureStream(30),{mimeType:type,videoBitsPerSecond:8e6});const ch=[];rec.ondataavailable=e=>e.data.size&&ch.push(e.data);
+  const done=new Promise(r=>rec.onstop=r);$('cardStatus').textContent='릴스 녹화 중 ('+total+'초, 창을 가리지 마세요)';rec.start(200);
+  const t0=performance.now();await new Promise(res=>{(function f(){const t=(performance.now()-t0)/1000;draw(Math.min(t,total));t<total+0.15?requestAnimationFrame(f):res();})();});
+  rec.stop();await done;const ext=type.startsWith('video/mp4')?'mp4':'webm';const blob=new Blob(ch,{type:type.split(';')[0]});
+  await IDB.set('igReel',{files:[{name:'reel.'+ext,blob,type:blob.type}],caption:nmCaption(),ts:Date.now()});
+  $('cardStatus').textContent='릴스 완료 ('+(blob.size/1048576).toFixed(1)+'MB, 무음) · 인스타 업로드용 보관 완료';btn.disabled=false;
+}
+(function(){
+  const b=document.createElement('button');b.id='makeReel';b.type='button';b.className='gray';b.textContent='릴스 영상 만들기 (무음)';
+  b.onclick=nmMakeReel;$('downloadCards').after(b);
+  if(location.hash.startsWith('#ig-export')){
+    const key=location.hash.includes('reel')?'igReel':'igCards';
+    IDB.get(key).then(d=>{
+      const msg=d?{type:'nm-cards',files:d.files,caption:d.caption,ts:d.ts}:{type:'nm-cards',error:'보관된 '+(key==='igReel'?'릴스':'카드')+'가 없습니다'};
+      try{window.opener.postMessage(msg,'https://www.instagram.com');}catch(e){}
+      setTimeout(()=>window.close(),800);
+    });
+  }
+})();
+</script>
+
 </body>
 
 </html>
