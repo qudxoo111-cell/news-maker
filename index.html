@@ -1033,9 +1033,18 @@ async function nmSaveForIG(){
     $('cardStatus').textContent+=' · 인스타 업로드용 보관 완료';
   }catch(e){console.error(e);}
 }
+const NM_BGM=[ // Pixabay Content License (상업 이용 가능, 출처 표기 불필요) - 잔잔한 곡 중 랜덤
+  ['10/16/audio_6022f8d16c','AtlasAudio - Calm'],
+  ['11/11/audio_448e1b5a5a','AtlasAudio - Calm'],
+  ['11/14/audio_e5bf687afe','The_Mountain - Calm'],
+  ['11/16/audio_e36c04c7f8','Sub_Clair - Calm Music'],
+  ['11/11/audio_7260dc9270','AtlasAudio - Calm Meditation'],
+  ['11/06/audio_2339a294b7','andriig - Calm']];
 async function nmMakeReel(){
   if(!generatedCards.length){alert('먼저 카드뉴스를 만들어 주세요.');return;}
   const btn=$('makeReel'); btn.disabled=true;
+  const useBgm=!$('nmBgm')||$('nmBgm').checked;
+  const ac=new (window.AudioContext||window.webkitAudioContext)(); try{await ac.resume();}catch(e){}
   const cv=document.createElement('canvas');cv.width=1080;cv.height=1920;const x=cv.getContext('2d');
   const imgs=generatedCards.map(c=>c.canvas), D=3, T=0.5, n=imgs.length, total=n*D;
   function card(img,a,z){x.save();x.globalAlpha=a;
@@ -1044,17 +1053,32 @@ async function nmMakeReel(){
   function draw(t){x.fillStyle='#000';x.fillRect(0,0,1080,1920);const i=Math.min(n-1,Math.floor(t/D)),lt=t-i*D;
     card(imgs[i],1,1+0.05*lt/D); if(i<n-1&&lt>D-T) card(imgs[i+1],(lt-(D-T))/T,1);
     x.fillStyle='rgba(255,255,255,.25)';x.fillRect(140,1740,800,8);x.fillStyle='#e8457a';x.fillRect(140,1740,800*Math.min(1,t/total),8);}
-  const types=['video/mp4;codecs=avc1.640028','video/mp4','video/webm'];const type=types.find(t=>MediaRecorder.isTypeSupported(t));
-  const rec=new MediaRecorder(cv.captureStream(30),{mimeType:type,videoBitsPerSecond:8e6});const ch=[];rec.ondataavailable=e=>e.data.size&&ch.push(e.data);
-  const done=new Promise(r=>rec.onstop=r);$('cardStatus').textContent='릴스 녹화 중 ('+total+'초, 창을 가리지 마세요)';rec.start(200);
-  const t0=performance.now();await new Promise(res=>{(function f(){const t=(performance.now()-t0)/1000;draw(Math.min(t,total));t<total+0.15?requestAnimationFrame(f):res();})();});
-  rec.stop();await done;const ext=type.startsWith('video/mp4')?'mp4':'webm';const blob=new Blob(ch,{type:type.split(';')[0]});
-  await IDB.set('igReel',{files:[{name:'reel.'+ext,blob,type:blob.type}],caption:nmCaption(),ts:Date.now()});
-  $('cardStatus').textContent='릴스 완료 ('+(blob.size/1048576).toFixed(1)+'MB, 무음) · 인스타 업로드용 보관 완료';btn.disabled=false;
+  let src=null,g=null,credit='';const dest=ac.createMediaStreamDestination();
+  if(useBgm){try{
+    const pick=NM_BGM[Math.floor(Math.random()*NM_BGM.length)];$('cardStatus').textContent='배경음악 불러오는 중…';
+    const r=await fetch('https://cdn.pixabay.com/download/audio/2026/'+pick[0]+'.mp3');if(!r.ok)throw new Error('bgm '+r.status);
+    const buf=await ac.decodeAudioData(await r.arrayBuffer());
+    src=ac.createBufferSource();src.buffer=buf;g=ac.createGain();g.gain.value=0;src.connect(g);g.connect(dest);credit=pick[1];
+  }catch(e){console.warn('배경음악 실패 → 무음으로 진행',e);src=null;}}
+  draw(0);const vs=cv.captureStream(0),vt=vs.getVideoTracks()[0];
+  const stream=new MediaStream([vt].concat(src?dest.stream.getAudioTracks():[]));
+  const types=src?['video/mp4;codecs=avc1.640028,mp4a.40.2','video/mp4;codecs=avc1,mp4a','video/mp4','video/webm;codecs=vp9,opus','video/webm']:['video/mp4;codecs=avc1.640028','video/mp4','video/webm'];
+  const type=types.find(t=>MediaRecorder.isTypeSupported(t));
+  const rec=new MediaRecorder(stream,{mimeType:type,videoBitsPerSecond:8e6,audioBitsPerSecond:128000});const ch=[];rec.ondataavailable=e=>e.data.size&&ch.push(e.data);
+  const done=new Promise(r=>rec.onstop=r);$('cardStatus').textContent='릴스 만드는 중 ('+total+'초)';rec.start(200);
+  if(src){const a=ac.currentTime;g.gain.setValueAtTime(0,a);g.gain.linearRampToValueAtTime(0.35,a+1);g.gain.setValueAtTime(0.35,a+total-2.5);g.gain.linearRampToValueAtTime(0,a+total);src.start(a);}
+  // 타이머로 프레임을 직접 넣음 → 창이 가려져도 끊기지 않음 (약 30fps)
+  const t0=performance.now();await new Promise(res=>{(function f(){const t=(performance.now()-t0)/1000;draw(Math.min(t,total));vt.requestFrame&&vt.requestFrame();t<total+0.15?setTimeout(f,31):res();})();});
+  rec.stop();await done;try{src&&src.stop();}catch(e){}try{ac.close();}catch(e){}
+  const ext=type.startsWith('video/mp4')?'mp4':'webm';const blob=new Blob(ch,{type:type.split(';')[0]});
+  const cap=nmCaption()+(credit?'\n🎵 음악: '+credit+' (Pixabay)':'');
+  await IDB.set('igReel',{files:[{name:'reel.'+ext,blob,type:blob.type}],caption:cap,ts:Date.now()});
+  $('cardStatus').textContent='릴스 완료 ('+(blob.size/1048576).toFixed(1)+'MB, '+(credit?'배경음악: '+credit:'무음')+') · 인스타 업로드용 보관 완료';btn.disabled=false;
 }
 (function(){
-  const b=document.createElement('button');b.id='makeReel';b.type='button';b.className='gray';b.textContent='릴스 영상 만들기 (무음)';
+  const b=document.createElement('button');b.id='makeReel';b.type='button';b.className='gray';b.textContent='릴스 영상 만들기';
   b.onclick=nmMakeReel;$('downloadCards').after(b);
+  const lb=document.createElement('label');lb.style.cssText='margin-left:8px;font-size:14px;white-space:nowrap';lb.innerHTML='<input type="checkbox" id="nmBgm" checked> 잔잔한 무료 배경음악';b.after(lb);
   if(location.hash.startsWith('#ig-export')){
     const key=location.hash.includes('reel')?'igReel':'igCards';
     IDB.get(key).then(d=>{
