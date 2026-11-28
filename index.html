@@ -157,13 +157,14 @@ td img{height:64px;margin-right:4px;border-radius:4px}
     <h2><span class="step">4</span>사진 위에 내용 넣기 — 카드뉴스 만들기</h2>
     <div class="row cardnews-controls">
       <label>대상 뉴스 번호 <input id="cardIndex" type="number" min="1" value="1"></label>
-      <label>스타일 <select id="cardStyle"><option value="modern" selected>모던</option><option value="magazine">매거진</option></select></label>
+      <label>스타일 <select id="cardStyle"><option value="canva" selected>뉴스 (큰 글씨·노란 태그)</option><option value="modern">모던</option><option value="magazine">매거진</option></select></label>
       <label><input type="checkbox" id="cardUsePhoto" checked> 배경 사진 사용</label>
       <label><input type="checkbox" id="cardUseArticle" checked> 기사 본문 요약 사용</label>
     </div>
     <div class="button-row">
       <button id="makeCards" type="button">카드뉴스 3장 만들기</button>
       <button class="gray" id="downloadCards" type="button" disabled>PNG 3장 다운로드</button>
+      <textarea id="cardCopy" style="min-height:74px;font-size:14px;margin:6px 0" placeholder="카드 문구 (선택) — 한 줄에 한 장, / 는 줄바꿈&#10;JYP 떠난 지효/칠레 간다&#10;비냐 델 마르/K팝 솔로 최초&#10;내년 2월 26일/칠레 무대 선다&#10;(비워두면 제목·기사 첫 문장·끝 문장으로 자동)"></textarea>
       <span id="cardStatus" class="card-status">뉴스를 입력한 뒤 원하는 번호를 선택하고 카드뉴스를 만드세요.</span>
     </div>
     <div id="cardPreview" class="card-grid"></div>
@@ -878,7 +879,7 @@ $('makeCards').addEventListener('click', async()=>{
       if(bg){ bgImg=bg.img; bgMeta=bg.meta; }
     }
     status.textContent='카드뉴스 레이아웃 생성 중...';
-    generatedCards=renderCardSet(item,bgImg,$('cardStyle').value);
+    generatedCards=$('cardStyle').value==='canva'?renderCardSetCanva(item,bgImg,bgMeta):renderCardSet(item,bgImg,$('cardStyle').value);
     renderCardPreview(generatedCards,item,bgMeta);
     window.nmLast={item,bgMeta,person:(item.title||'').split(/[,·\s]/)[0]};
     nmSaveForIG();
@@ -892,6 +893,47 @@ $('makeCards').addEventListener('click', async()=>{
 $('downloadCards').addEventListener('click', downloadGeneratedCards);
 
 updateCounts();
+</script>
+
+<script>
+/* ===== 뉴스 스타일 카드 (Canva 템플릿 느낌: 사진 전면 + 아래 그라데이션 + 노란 태그 + 큰 글씨 2줄) ===== */
+function nmWrapK(ctx,text,maxW){const out=[];for(const para of String(text).split('/')){let line='';for(const ch of para.trim()){const t=line+ch;
+  if(ctx.measureText(t).width>maxW&&line){const sp=line.lastIndexOf(' ');if(sp>line.length*0.5){out.push(line.slice(0,sp));line=line.slice(sp+1)+ch;}else{out.push(line);line=ch;}}else line=t;}if(line)out.push(line);}return out;}
+function nmFitText(ctx,text,maxW,start,min,maxLines){let size=start,lines;
+  for(;size>=min;size-=4){ctx.font='800 '+size+'px "Malgun Gothic","맑은 고딕",sans-serif';lines=nmWrapK(ctx,text,maxW);if(lines.length<=maxLines)return{size,lines};}
+  size=min;ctx.font='800 '+size+'px "Malgun Gothic","맑은 고딕",sans-serif';lines=nmWrapK(ctx,text,maxW).slice(0,maxLines);
+  const k=lines.length-1;while(lines[k].length>1&&ctx.measureText(lines[k]+'…').width>maxW)lines[k]=lines[k].slice(0,-1);lines[k]=lines[k].replace(/[\s,.]+$/,'')+'…';return{size,lines};}
+function renderCardSetCanva(item,bgImg,bgMeta){
+  const W=1080,H=1350,L=62,F='"Malgun Gothic","맑은 고딕",sans-serif';
+  const pieces=splitSentences(safeText(item.content||''));
+  const manual=($('cardCopy')&&$('cardCopy').value||'').split('\n').map(s=>s.trim()).filter(Boolean);
+  const texts=[manual[0]||safeText(item.title||item.q||'오늘의 핫이슈'),manual[1]||pieces[0]||safeText(item.title||''),manual[2]||(pieces.length>1?pieces[pieces.length-1]:pieces[0])||''];
+  const tags=['핫이슈','핵심','반응'];
+  const credit=bgMeta?('사진='+(bgMeta.artist||'').replace(/<[^>]+>/g,'').slice(0,40)+(bgMeta.license?' ('+bgMeta.license+')':'')):'';
+  return texts.map((txt,i)=>{
+    const c=createCanvas(),x=c.getContext('2d');x.textBaseline='alphabetic';
+    x.fillStyle='#1b1b1f';x.fillRect(0,0,W,H);
+    if(bgImg){const ir=bgImg.width/bgImg.height,br=W/H;let sw,sh,sx,sy;
+      if(ir>br){sh=bgImg.height;sw=sh*br;sx=(bgImg.width-sw)/2;sy=0}else{sw=bgImg.width;sh=sw/br;sx=0;sy=(bgImg.height-sh)/4}
+      x.drawImage(bgImg,sx,sy,sw,sh,0,0,W,H);}
+    let g=x.createLinearGradient(0,0,0,220);g.addColorStop(0,'rgba(0,0,0,.45)');g.addColorStop(1,'rgba(0,0,0,0)');x.fillStyle=g;x.fillRect(0,0,W,220);
+    g=x.createLinearGradient(0,600,0,H);g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(.35,'rgba(0,0,0,.55)');g.addColorStop(.7,'rgba(0,0,0,.85)');g.addColorStop(1,'rgba(0,0,0,.92)');x.fillStyle=g;x.fillRect(0,600,W,H-600);
+    x.fillStyle='#fff';x.font='700 28px '+F;x.fillText('오늘의 핫이슈 | @densing703',L,88);
+    const fit=nmFitText(x,txt,W-2*L,i===0?120:108,64,i===0?2:3),lh=Math.round(fit.size*1.18);
+    let bottom=H-62;
+    if(credit){x.fillStyle='rgba(255,255,255,.6)';x.font='600 26px '+F;x.fillText(credit,L+4,bottom);bottom-=58;}
+    if(i===0){x.fillStyle='#fff';x.font='700 38px '+F;x.fillText('넘겨서 자세히 보기 →',L+4,bottom);bottom-=56;x.fillStyle='#FFD400';x.fillRect(L,bottom,W-2*L,10);bottom-=40;}
+    if(i===2){x.fillStyle='#FFD400';x.font='700 38px '+F;x.fillText('팔로우하고 핫이슈 먼저 보기',L+4,bottom);bottom-=66;}
+    const textTop=bottom-lh*fit.lines.length;
+    x.fillStyle='#fff';x.font='800 '+fit.size+'px '+F;x.shadowColor='rgba(0,0,0,.45)';x.shadowBlur=12;
+    fit.lines.forEach((ln,k)=>x.fillText(ln,L,textTop+lh*(k+1)-Math.round(fit.size*0.22)));x.shadowBlur=0;
+    x.font='800 44px '+F;const tw=x.measureText(tags[i]).width,ty=textTop-96;
+    x.fillStyle='#FFD400';x.fillRect(L,ty,tw+56,78);x.fillStyle='#000';x.fillText(tags[i],L+28,ty+56);
+    // 글자 수에 맞춘 릴스 노출 시간: 기본 2.5초 + 글자당 0.18초 (3.5~7초)
+    const chars=fit.lines.join('').replace(/\s/g,'').length+tags[i].length+(i===2?6:i===0?4:0);
+    return {title:(i+1)+'_'+['표지','핵심','반응'][i],canvas:c,readSec:Math.min(7,Math.max(3.5,+(2.5+chars*0.18).toFixed(1)))};
+  });
+}
 </script>
 
 <script>
@@ -1046,11 +1088,11 @@ async function nmMakeReel(){
   const useBgm=!$('nmBgm')||$('nmBgm').checked;
   const ac=new (window.AudioContext||window.webkitAudioContext)(); try{await ac.resume();}catch(e){}
   const cv=document.createElement('canvas');cv.width=1080;cv.height=1920;const x=cv.getContext('2d');
-  const imgs=generatedCards.map(c=>c.canvas), D=3, T=0.5, n=imgs.length, total=n*D;
+  const imgs=generatedCards.map(c=>c.canvas), DS=generatedCards.map(c=>c.readSec||3), T=0.5, n=imgs.length, ST=DS.map((_,k)=>DS.slice(0,k).reduce((a,b)=>a+b,0)), total=DS.reduce((a,b)=>a+b,0);
   function card(img,a,z){x.save();x.globalAlpha=a;
     x.filter='blur(40px) brightness(0.5)';x.drawImage(img,-60,-60,1200,2040);x.filter='none';
     const w=1080*z,h=1350*z;x.beginPath();x.rect(0,285,1080,1350);x.clip();x.drawImage(img,(1080-w)/2,285+(1350-h)/2,w,h);x.restore();}
-  function draw(t){x.fillStyle='#000';x.fillRect(0,0,1080,1920);const i=Math.min(n-1,Math.floor(t/D)),lt=t-i*D;
+  function draw(t){x.fillStyle='#000';x.fillRect(0,0,1080,1920);let i=0;while(i<n-1&&t>=ST[i+1])i++;const lt=t-ST[i],D=DS[i];
     card(imgs[i],1,1+0.05*lt/D); if(i<n-1&&lt>D-T) card(imgs[i+1],(lt-(D-T))/T,1);
     x.fillStyle='rgba(255,255,255,.25)';x.fillRect(140,1740,800,8);x.fillStyle='#e8457a';x.fillRect(140,1740,800*Math.min(1,t/total),8);}
   let src=null,g=null,credit='';const dest=ac.createMediaStreamDestination();
